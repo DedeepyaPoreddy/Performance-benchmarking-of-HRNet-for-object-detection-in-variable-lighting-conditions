@@ -1,61 +1,95 @@
-# Performance benchmarking of HRNet for object detection in variable lighting conditions
+# Image Classification & Segmentation Sensitivity to Lighting (HRNet)
 
-This project evaluates object detection accuracy under varying illumination—morning, afternoon, evening, and night. It analyzes how lighting affects model performance, especially for autonomous vehicles where safe navigation depends on reliable detection. The aim is to quantify performance, expose challenges in low-light scenes, and identify opportunities for more robust real-world deployment.
-
-We use the [Day-night Dataset](https://www.kaggle.com/datasets/stevemark/daynight-dataset) from Kaggle.
-
-## Project Overview
-
-Standard object detection models often degrade in low-light conditions. This project benchmarks a pre-trained **HRNet (High-Resolution Network)** on semantic segmentation tasks across different times of day. It further investigates whether image enhancement techniques (CLAHE and Denoising) can recover performance in night-time scenes.
-
-**Key Features:**
-- **Time-of-Day Categorization:** Automatically classifies images into Morning, Afternoon, Evening, and Night based on timestamps.
-- **HRNet Backbone:** Uses `hrnet_w48` pretrained on Cityscapes for robust high-resolution feature extraction.
-- **Low-Light Enhancement:** Implements Contrast Limited Adaptive Histogram Equalization (CLAHE) and Fast Non-Local Means Denoising to improve night-time images.
-- **Performance Metrics:** Evaluates "Average Confidence" and "Average Number of Objects Detected" to quantify improvement.
+This project studies how outdoor-scene **semantic segmentation** behaves under different lighting conditions by grouping images by time-of-day (using timestamp metadata), running a pre-trained **HRNet** segmentation model, and reporting proxy performance metrics (confidence + number of detected classes/objects).
 
 ## Dataset
 
-- **Source:** Kaggle Day-night Dataset
-- **Total Images:** 1,722
-- **Distribution:**
-  - **Morning (05:00 - 12:00):** 500 images
-  - **Afternoon (12:00 - 17:00):** 365 images
-  - **Evening (17:00 - 21:00):** 286 images
-  - **Night (21:00 - 05:00):** 571 images
+- **Source (Kaggle)**: Day-night Dataset: https://www.kaggle.com/datasets/stevemark/daynight-dataset
+- In this project, images are further categorized into **morning, afternoon, evening, and night** based on timestamp hour ranges.
 
-## Methodology
+## Goals
 
-1.  **Data Preprocessing:**
-    -   Images are paired with timestamps parsed from filename metadata.
-    -   Images are categorized into four distinct time periods.
-2.  **Model Inference:**
-    -   A pre-trained HRNet model (`hrnet_w48_cityscapes_v2.pth`) performs semantic segmentation.
-    -   We compute the mean probability (confidence) of detected classes and count unique objects per image.
-3.  **Night Enhancement:**
-    -   **CLAHE:** Applied to the L-channel of LAB converted images (Clip Limit: 2.0, Tile Grid: 8x8).
-    -   **Denoising:** `cv2.fastNlMeansDenoisingColored` (h=10, hColor=10, templateWindowSize=7, searchWindowSize=21).
-4.  **Comparison:**
-    -   Metrics are calculated for original night images vs. enhanced night images.
+- Categorize images into **morning/afternoon/evening/night** using timestamps.
+- Run semantic segmentation on sampled images per category using a pre-trained HRNet model (no fine-tuning; no ground-truth masks).
+- Compare segmentation behavior across time-of-day categories using:
+  - **Average confidence** (mean of max class probability per pixel).
+  - **Average objects detected** (unique predicted classes excluding background).
+- Apply **low-light enhancement + denoising** for night images and re-evaluate.
+
+## Method
+
+### 1) Time-of-day classification
+- Parses timestamps (supports multiple timestamp-file formats) and assigns each image to one of four buckets:
+  - Morning: 05–12
+  - Afternoon: 12–17
+  - Evening: 17–21
+  - Night: otherwise
+
+### 2) Segmentation model (HRNet)
+- Uses TensorFlow Hub model: `google/HRNet/camvid-hrnetv2-w48/1`.
+- Produces segmentation masks, converts them to RGB via a class-color legend, and overlays masks on the original images for visualization.
+
+### 3) Metrics (proxy evaluation)
+Per image, the notebook computes:
+- **Confidence** = mean over pixels of the maximum predicted probability across classes.
+- **Objects detected** = number of unique predicted classes in the mask (excluding background).
+
+### 4) Night enhancement (optional)
+For night images, the notebook applies:
+- HSV histogram equalization (brightness enhancement).
+- Non-local means denoising (`fastNlMeansDenoisingColored`).
 
 ## Results
 
-Our experiments show that night-time conditions significantly reduce model confidence and object recall. However, applying enhancement techniques yields measurable improvements.
+### Performance Analysis by Time of Day (HRNet baseline)
 
-| Metric | Night (Baseline) | Night (Enhanced) | Improvement |
-| :--- | :--- | :--- | :--- |
-| **Avg. Confidence** | 0.8210 | **0.8308** | +1.2% |
-| **Avg. Objects Detected** | 6.0 | **8.0** | +33% |
+- Morning:
+  - Average Confidence: 0.9465
+  - Average Objects Detected: 7.50
+- Afternoon:
+  - Average Confidence: 0.8881
+  - Average Objects Detected: 8.00
+- Evening:
+  - Average Confidence: 0.9049
+  - Average Objects Detected: 7.50
+- Night:
+  - Average Confidence: 0.8210
+  - Average Objects Detected: 6.00
 
-*Note: Morning, Afternoon, and Evening baseline metrics generally exceed Night performance, highlighting the impact of illumination.*
+### Night performance after enhancement + denoising
 
-## Usage
+- Night:
+  - Average Confidence: 0.8308
+  - Average Objects Detected: 8.00
 
-### Requirements
-```txt
-torch
-torchvision
-opencv-python
-pillow
-matplotlib
-numpy
+> Note: The notebook currently evaluates a **small random sample** per category (e.g., `numsamples=2` in the provided code), so these averages reflect the sampled subset unless you modify the notebook to run over all images.
+
+## How to run
+
+1. Open `IA_Project.ipynb` (Google Colab recommended; notebook uses `google.colab.drive`).
+2. Mount Google Drive and set your dataset paths:
+   - `basedir`
+   - `imagedir`
+   - `timestampdir`
+3. Run all cells to:
+   - Build `imagetimepairs` and `timecategories`
+   - Load HRNet model from TensorFlow Hub
+   - Run time-of-day analysis and view overlays
+   - Optionally run night enhancement + denoising and re-check night metrics
+
+## Repository files
+
+- `IA_Project.ipynb` — end-to-end pipeline: timestamp parsing, time-of-day grouping, HRNet inference, metrics, and night enhancements.
+- `Image_Analysis_Final_Report.docx` — project write-up (design + discussion).
+
+## Limitations
+
+- No ground-truth masks are available, so metrics are **proxy** measures (not IoU/mAP).
+- HRNet is pre-trained on a different dataset/label space; results may not perfectly match outdoor webcam scenes.
+- Results depend on the **sampling size** unless you evaluate all images per category.
+
+## Suggested improvements
+
+- Aggregate metrics over **all images** per category and export CSV for reproducibility.
+- Add more enhancement baselines for night images and compare systematically.
+- If labeled masks become available, compute standard segmentation metrics (IoU per class, mIoU).
